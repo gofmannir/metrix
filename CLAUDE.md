@@ -98,3 +98,65 @@ make clean
 - Loguru is configured for logging (see `__main__.py`)
 - The package is installed in editable mode during `uv sync`
 - Entry point allows running via `uv run metrix` command
+
+## HistoricalDataProvider
+
+The `HistoricalDataProvider` class wraps the Polygon.io API for fetching historical market data with automatic caching.
+
+### Configuration
+
+Uses `pydantic-settings` with environment variable loading:
+
+```python
+class HistoricalDataProviderConfig(BaseSettings):
+    polygon_api_key: str           # Required: METRIX_POLYGON_API_KEY
+    cache_dir: Path = Path(".cache/historical_data")  # Cache directory
+    use_cache: bool = True          # Enable/disable caching
+```
+
+Environment variables use the `METRIX_` prefix (e.g., `METRIX_POLYGON_API_KEY`).
+
+### Usage
+
+```python
+from metrix.historical_data_provider import HistoricalDataProvider
+
+# Initialize (loads config from .env automatically)
+provider = HistoricalDataProvider()
+
+# Fetch data
+df = provider.get_historical_data(
+    ticker="AAPL",
+    multiplier=1,
+    timespan="day",
+    from_date="2021-01-01",
+    to_date="2021-12-31",
+    adjusted=True,
+    sort="asc",
+    limit=50000,
+)
+```
+
+### Caching Behavior
+
+- **Automatic caching**: Data is cached as parquet files in `cache_dir`
+- **Cache key**: SHA256 hash of all request parameters
+- **Cache hit**: Loads data from parquet file (no API call)
+- **Cache miss**: Fetches from Polygon API and saves to cache
+- **Disable caching**: Set `use_cache=False` in config
+
+### Data Format
+
+Returns pandas DataFrame with columns:
+- `open`, `high`, `low`, `close`: Price data
+- `volume`: Trading volume
+- `vwap`: Volume-weighted average price
+- `timestamp`: Pandas datetime (UTC)
+- `transactions`: Number of transactions
+
+### Dependencies
+
+- `polygon-api-client`: Polygon.io REST API wrapper
+- `pyarrow`: Required for parquet file I/O
+- `pydantic-settings`: Configuration management
+- `pandas`: DataFrame operations

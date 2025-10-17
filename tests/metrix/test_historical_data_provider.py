@@ -1,5 +1,6 @@
 """Tests for HistoricalDataProvider."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -22,14 +23,20 @@ class TestHistoricalDataProviderConfig:
         config = HistoricalDataProviderConfig(polygon_api_key="explicit_key")
         assert config.polygon_api_key == "explicit_key"
 
+    def test_config_cache_defaults(self) -> None:
+        """Test config has cache defaults."""
+        config = HistoricalDataProviderConfig(polygon_api_key="test_key")
+        assert config.use_cache is True
+        assert config.cache_dir == Path(".cache/historical_data")
+
 
 class TestHistoricalDataProvider:
     """Tests for HistoricalDataProvider."""
 
     @pytest.fixture
-    def mock_config(self) -> HistoricalDataProviderConfig:
-        """Create a mock configuration."""
-        return HistoricalDataProviderConfig(polygon_api_key="test_key")
+    def mock_config(self, tmp_path: Path) -> HistoricalDataProviderConfig:
+        """Create a mock configuration with temp cache directory."""
+        return HistoricalDataProviderConfig(polygon_api_key="test_key", cache_dir=tmp_path / "cache")
 
     @pytest.fixture
     def provider(self, mock_config: HistoricalDataProviderConfig) -> HistoricalDataProvider:
@@ -135,3 +142,145 @@ class TestHistoricalDataProvider:
 
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 0
+
+    def test_cache_key_generation(self, provider: HistoricalDataProvider) -> None:
+        """Test that cache keys are generated consistently."""
+        key1 = provider._generate_cache_key(  # noqa: SLF001
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+            adjusted=True,
+            sort="asc",
+            limit=50000,
+        )
+        key2 = provider._generate_cache_key(  # noqa: SLF001
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+            adjusted=True,
+            sort="asc",
+            limit=50000,
+        )
+        key3 = provider._generate_cache_key(  # noqa: SLF001
+            ticker="GOOGL",  # Different ticker
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+            adjusted=True,
+            sort="asc",
+            limit=50000,
+        )
+
+        # Same parameters should generate same key
+        assert key1 == key2
+        # Different parameters should generate different key
+        assert key1 != key3
+        # Keys should be hex strings
+        assert len(key1) == 64  # noqa: PLR2004  # SHA256 produces 64 hex characters
+
+    def test_cache_saves_and_loads_data(self, provider: HistoricalDataProvider) -> None:
+        """Test that data is saved to cache and loaded from cache."""
+        # Create mock aggregates
+        mock_agg = MagicMock()
+        mock_agg.open = 150.0
+        mock_agg.high = 152.0
+        mock_agg.low = 149.0
+        mock_agg.close = 151.0
+        mock_agg.volume = 1000000
+        mock_agg.vwap = 150.5
+        mock_agg.timestamp = 1609459200000
+        mock_agg.transactions = 100
+
+        # Setup mock client
+        mock_client = MagicMock()
+        mock_client.list_aggs.return_value = iter([mock_agg])
+        provider.polygon_client = mock_client
+
+        # First call - should fetch from API and save to cache
+        df1 = provider.get_historical_data(
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+        )
+
+        # Verify API was called
+        assert mock_client.list_aggs.call_count == 1
+
+        # Second call with same parameters - should load from cache
+        df2 = provider.get_historical_data(
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+        )
+
+        # Verify API was not called again
+        assert mock_client.list_aggs.call_count == 1
+
+        # DataFrames should be equal
+        pd.testing.assert_frame_equal(df1, df2)
+
+    def test_cache_disabled(self, tmp_path: Path) -> None:
+        """Test that caching can be disabled."""
+        config = HistoricalDataProviderConfig(polygon_api_key="test_key", cache_dir=tmp_path / "cache", use_cache=False)
+        provider = HistoricalDataProvider(config=config)
+
+        # Create mock aggregate
+        mock_agg = MagicMock()
+        mock_agg.open = 150.0
+        mock_agg.high = 152.0
+        mock_agg.low = 149.0
+        mock_agg.close = 151.0
+        mock_agg.volume = 1000000
+        mock_agg.vwap = 150.5
+        mock_agg.timestamp = 1609459200000
+        mock_agg.transactions = 100
+
+        # Setup mock client
+        mock_client = MagicMock()
+        mock_client.list_aggs.return_value = iter([mock_agg])
+        provider.polygon_client = mock_client
+
+        # First call
+        provider.get_historical_data(
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+        )
+
+        # Second call - should still call API since cache is disabled
+        provider.get_historical_data(
+            ticker="AAPL",
+            multiplier=1,
+            timespan="day",
+            from_date="2021-01-01",
+            to_date="2021-01-02",
+        )
+
+        # Verify API was called twice
+        assert mock_client.list_aggs.call_count == 2  # noqa: PLR2004
+
+        # Verify no cache files were created
+        assert not (config.cache_dir).exists() or len(list(config.cache_dir.glob("*.parquet"))) == 0
+
+    def test_cache_directory_creation(self, tmp_path: Path) -> None:
+        """Test that cache directory is created on initialization."""
+        cache_dir = tmp_path / "new_cache_dir"
+        assert not cache_dir.exists()
+
+        config = HistoricalDataProviderConfig(polygon_api_key="test_key", cache_dir=cache_dir)
+        HistoricalDataProvider(config=config)
+
+        # Cache directory should be created
+        assert cache_dir.exists()
+        assert cache_dir.is_dir()
