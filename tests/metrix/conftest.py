@@ -5,7 +5,7 @@ from loguru import logger
 
 
 @pytest.fixture(autouse=True)
-def _reset_loguru() -> None:  # noqa: PT005
+def _reset_loguru() -> None:
     """Reset loguru configuration before each test to avoid interference."""
     # Remove all handlers and re-add stderr with a consistent format
     logger.remove()

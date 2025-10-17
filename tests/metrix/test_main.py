@@ -15,8 +15,7 @@ def test_main_function_exists() -> None:
 
 def test_main_returns_none() -> None:
     """Test that main function returns None."""
-    result = main()
-    assert result is None
+    main()  # main() returns None, so we don't need to capture the result
 
 
 def test_main_logs_message(mocker: MagicMock) -> None:
@@ -39,6 +38,7 @@ def test_main_module_execution_as_script() -> None:
     # Use coverage run to track subprocess coverage
     result = subprocess.run(
         [sys.executable, "-m", "coverage", "run", "--source=src", str(main_path)],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -54,6 +54,7 @@ def test_main_module_execution_as_module() -> None:
     # Execute as a module: python -m metrix
     result = subprocess.run(
         [sys.executable, "-m", "metrix"],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,

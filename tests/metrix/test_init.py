@@ -15,7 +15,7 @@ def test_version_format() -> None:
     assert len(version) > 0
     # Basic semantic versioning check (e.g., "0.1.0")
     parts = version.split(".")
-    assert len(parts) >= 2  # At least major.minor
+    assert len(parts) >= 2  # noqa: PLR2004  # At least major.minor
     assert all(part.isdigit() or "-" in part for part in parts)  # Allow for pre-release versions
 
 
